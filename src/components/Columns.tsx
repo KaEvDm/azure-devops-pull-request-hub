@@ -15,7 +15,6 @@ import {
   GetVoteIconColor,
   isReviewerDeclined,
 } from "./ReviewerVoteIconStatus";
-import { VssPersona } from "azure-devops-ui/VssPersona";
 import { PullRequestPillInfo } from "./PullRequestPillInfo";
 import { Link, Spinner, SpinnerSize } from "office-ui-fabric-react";
 import * as PullRequestModel from "../models/PullRequestModel";
@@ -24,6 +23,7 @@ import { Pill, PillSize, PillVariant } from "azure-devops-ui/Pill";
 import { ConditionalChildren } from "azure-devops-ui/ConditionalChildren";
 import { Observer } from "azure-devops-ui/Observer";
 import { UserPreferencesInstance } from "../common";
+import { IdentityAvatar } from "./IdentityAvatar";
 
 export function openNewWindowTab(targetUrl: string): void {
   window.open(targetUrl, UserPreferencesInstance.openPRNewWindow ? "_blank" : "_top");
@@ -150,7 +150,7 @@ export function TitleColumn(
                 <div
                   className="flex-column title-column-subdetails"
                   style={{ marginLeft: "6px", marginTop: "5px" }}
-                ></div>
+                />
                 <div
                   className="flex-column title-column-subdetails"
                   style={{ marginLeft: "6px", marginTop: "5px" }}
@@ -190,11 +190,9 @@ export function DetailsColumn(
             iconProps={{
               render: () => {
                 return (
-                  <VssPersona
+                  <IdentityAvatar
                     className="icon-margin"
-                    imageUrl={
-                      tableItem.gitPullRequest.createdBy._links.avatar.href
-                    }
+                    identity={tableItem.gitPullRequest.createdBy}
                     size={"small"}
                     displayName={tableItem.gitPullRequest.createdBy.displayName}
                   />
@@ -293,7 +291,7 @@ export function DetailsColumn(
                   color={Data.draftColor}
                   className="icon-column-subdetails hideText"
                   iconProps={{ iconName: "Comment" }}
-                ></Pill>
+                />
               </Tooltip>
             </ConditionalChildren>
             <ConditionalChildren renderChildren={tableItem.hasCommitChanges()}>
@@ -392,8 +390,8 @@ export function ReviewersColumn(
                     <div className="flex-row rhythm-horizontal-4">
                       <div className="flex-column">
                         <div className="flex-row justify-start">
-                          <VssPersona
-                            imageUrl={reviewer._links.avatar.href}
+                          <IdentityAvatar
+                            identity={reviewer}
                             size={"medium"}
                             displayName={reviewer.displayName}
                           />
@@ -455,12 +453,12 @@ export function ReviewersColumn(
                   )}
                 >
                   <div className="relative reviewer-vote-item">
-                    <VssPersona
+                    <IdentityAvatar
                       key={`vss-persona-${rowIndex}-${reviewer.id}`}
                       className={`icon-margin repos-pr-reviewer-vote-avatar ${GetVoteIconColor(
                         reviewer
                       )}`}
-                      imageUrl={reviewer._links.avatar.href}
+                      identity={reviewer}
                       size={"medium"}
                     />
                     <ReviewerVoteIconStatus
