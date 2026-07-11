@@ -23,10 +23,14 @@
   "scripts": {
     "start": "HTTPS=true react-scripts start",
     "build": "react-scripts build",
+    "typecheck": "tsc --noEmit",
+    "lint": "tslint -c tslint.json src/services/AvatarService.ts src/components/IdentityAvatar.tsx src/components/Columns.tsx",
+    "lint:all": "tslint -p tsconfig.json -c tslint.json",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "package-release": "npm run clean-build && tfx extension create --root ./ --output-path ./pr-hub.vsix --manifests ./vss-extension.json ./vss-extension.release.json ./vss-extension.version.json",
     "package-dev": "echo $EXTENSION_VERSION_JSON && npm run clean-build && tfx extension create --root ./ --output-path ./pr-hub.vsix --manifests ./vss-extension.json ./vss-extension.dev.json ./vss-extension.version.json",
+    "package-custom": "npm run build && npm run clean-build && tfx extension create --root ./ --output-path ./pr-hub-custom.vsix --manifests ./vss-extension.custom.json",
     "clean-build": "del-cli build/**/runtime~main*.map build/**/runtime~main*.js"
   },
   "eslintConfig": {

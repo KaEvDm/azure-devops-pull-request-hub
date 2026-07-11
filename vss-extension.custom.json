@@ -1,0 +1,71 @@
+{
+  "manifestVersion": 1,
+  "id": "pr-hub-custom",
+  "publisher": "team-achiever",
+  "version": "1.0.1",
+  "name": "PR Hub - Custom",
+  "description": "Private PR Hub build with authenticated and cached Azure DevOps user avatars.",
+  "public": false,
+  "categories": ["Azure Repos"],
+  "demands": ["api-version/5.1"],
+  "scopes": [
+    "vso.code",
+    "vso.build",
+    "vso.graph",
+    "vso.work"
+  ],
+  "targets": [
+    {
+      "id": "Microsoft.VisualStudio.Services"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KaEvDm/azure-devops-pull-request-hub"
+  },
+  "icons": {
+    "default": "marketplace/logo.png",
+    "branding": "marketplace/logo.png"
+  },
+  "content": {
+    "details": {
+      "path": "marketplace/overview.md"
+    },
+    "license": {
+      "path": "marketplace/license.md"
+    }
+  },
+  "tags": ["code", "pull request", "git", "code review", "open source"],
+  "screenshots": [
+    { "path": "marketplace/screenshots/screenshot-01.png" },
+    { "path": "marketplace/screenshots/screenshot-02.png" },
+    { "path": "marketplace/screenshots/screenshot-03.png" }
+  ],
+  "files": [
+    {
+      "path": "build",
+      "addressable": true
+    },
+    {
+      "path": "marketplace",
+      "addressable": true
+    }
+  ],
+  "contributions": [
+    {
+      "id": "custom-view",
+      "type": "ms.vss-web.hub",
+      "targets": [
+        "ms.vss-code-web.code-hub-group"
+      ],
+      "properties": {
+        "name": "PR Hub - Custom",
+        "uri": "build/index.html",
+        "icon": {
+          "light": "marketplace/icon-light.png",
+          "dark": "marketplace/icon-dark.png"
+        }
+      }
+    }
+  ]
+}
