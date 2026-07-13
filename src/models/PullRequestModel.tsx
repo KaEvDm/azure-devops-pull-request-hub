@@ -23,6 +23,7 @@ import { getEvaluationsPerPullRequest } from "../services/AzureGitServices";
 import { EvaluationPolicyType } from "./GitModels";
 import { GitRepository } from 'azure-devops-extension-api/Git/Git';
 import { compare } from "../lib/date";
+import { isPolicyApprovedForReadiness } from "./PolicyStatus";
 
 export interface GitRepositoryModel extends GitRepository {
   isDisabled: boolean | undefined;
@@ -441,7 +442,11 @@ export class PullRequestModel {
             i.configuration.isBlocking === true
         )
         .every((i) => {
-          return i.status === "approved";
+          return isPolicyApprovedForReadiness(
+            i,
+            this.gitPullRequest.status === PullRequestStatus.Active,
+            this.gitPullRequest.completionOptions
+          );
         });
 
     // Build a fresh list and assign at the end so re-running (e.g. on a
@@ -458,7 +463,11 @@ export class PullRequestModel {
         const pullRequestPolicy = new PullRequestPolicy();
         pullRequestPolicy.id = p.evaluationId;
         pullRequestPolicy.displayName = `${p.configuration.type.displayName}`;
-        pullRequestPolicy.isApproved = p.status === "approved";
+        pullRequestPolicy.isApproved = isPolicyApprovedForReadiness(
+          p,
+          this.gitPullRequest.status === PullRequestStatus.Active,
+          this.gitPullRequest.completionOptions
+        );
 
         switch (p.configuration.type.id) {
           case EvaluationPolicyType.MinimumReviewers: {

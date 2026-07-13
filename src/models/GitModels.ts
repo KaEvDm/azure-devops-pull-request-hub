@@ -2,6 +2,7 @@ import { GitRepository } from "azure-devops-extension-api/Git/Git";
 
 export enum EvaluationPolicyType {
   MinimumReviewers = "fa4e907d-c16b-4a4c-9dfa-4906e5d171dd",
+  MergeStrategy = "fa4e907d-c16b-4a4c-9dfa-4916e5d171ab",
   WorkItemLinking = "40e92b44-2fe1-4dd6-b3d8-74a9c21d0c6e",
   Build = "0609b952-1397-4640-95ec-e00a01b2c241",
   RequiredReviewers = "fd2167ab-b0be-447a-8ec8-39368250530e",
