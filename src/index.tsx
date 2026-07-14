@@ -26,6 +26,7 @@ import { CoreRestClient } from "azure-devops-extension-api/Core/CoreClient";
 import { getClient } from "azure-devops-extension-api";
 import * as Data from "./tabs/PulRequestsTabData";
 import { Spinner, SpinnerSize } from "office-ui-fabric-react";
+import { formatTabCount, UNLOADED_TAB_COUNT } from "./models/TabCount";
 
 interface IHubContentState {
   errorMessage: string;
@@ -41,7 +42,7 @@ addPolyFills();
 export class App extends React.Component<{}, IHubContentState> {
   private toastRef: React.RefObject<Toast> = React.createRef<Toast>();
   private selectedTabId: ObservableValue<string>;
-  private activeCount: ObservableValue<number>;
+  private activeCount: ObservableValue<string>;
   private completedCount: ObservableValue<string>;
   private abandonedCount: ObservableValue<string>;
   private readonly coreClient: CoreRestClient;
@@ -56,9 +57,9 @@ export class App extends React.Component<{}, IHubContentState> {
     this.coreClient = getClient(CoreRestClient);
 
     this.selectedTabId = new ObservableValue("active");
-    this.activeCount = new ObservableValue(0);
-    this.completedCount = new ObservableValue("0");
-    this.abandonedCount = new ObservableValue("0");
+    this.activeCount = new ObservableValue(UNLOADED_TAB_COUNT);
+    this.completedCount = new ObservableValue(UNLOADED_TAB_COUNT);
+    this.abandonedCount = new ObservableValue(UNLOADED_TAB_COUNT);
 
     this.toggleUserPreferencesPanel = this.toggleUserPreferencesPanel.bind(
       this
@@ -138,7 +139,7 @@ export class App extends React.Component<{}, IHubContentState> {
               name="Active"
               id="active"
               iconProps={{ iconName: "Inbox" }}
-              badgeCount={this.activeCount}
+              renderBadge={() => this.renderCountBadge(this.activeCount)}
             />
             <Tab
               name="Recently Completed"
@@ -242,15 +243,15 @@ export class App extends React.Component<{}, IHubContentState> {
   };
 
   private onCountChangeActive = (count: number): void => {
-    this.activeCount.value = count;
+    this.activeCount.value = formatTabCount(count);
   };
 
   private onCountChangeCompleted = (count: number, capped?: boolean): void => {
-    this.completedCount.value = capped ? `${count}+` : count.toString();
+    this.completedCount.value = formatTabCount(count, capped);
   };
 
   private onCountChangeAbandoned = (count: number, capped?: boolean): void => {
-    this.abandonedCount.value = capped ? `${count}+` : count.toString();
+    this.abandonedCount.value = formatTabCount(count, capped);
   };
 
   // The built-in badgeCount prop only accepts numbers; rendering the badge

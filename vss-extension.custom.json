@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "pr-hub-custom",
   "publisher": "team-achiever",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "name": "PR Hub - Custom",
   "description": "Private PR Hub build with reliable avatars and accurate readiness for deferred merge-strategy policies.",
   "public": false,

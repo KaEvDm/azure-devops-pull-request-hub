@@ -24,6 +24,8 @@ import { ConditionalChildren } from "azure-devops-ui/ConditionalChildren";
 import { Observer } from "azure-devops-ui/Observer";
 import { UserPreferencesInstance } from "../common";
 import { IdentityAvatar } from "./IdentityAvatar";
+import { PullRequestStatus } from "azure-devops-extension-api/Git/Git";
+import { getPullRequestActivityDate } from "../models/PullRequestDate";
 
 export function openNewWindowTab(targetUrl: string): void {
   window.open(targetUrl, UserPreferencesInstance.openPRNewWindow ? "_blank" : "_top");
@@ -318,6 +320,19 @@ export function DateColumn(
   tableColumn: ITableColumn<PullRequestModel.PullRequestModel>,
   tableItem: PullRequestModel.PullRequestModel
 ): JSX.Element {
+  const status = tableItem.gitPullRequest.status;
+  const isActive = status === PullRequestStatus.Active;
+  const activityDate = getPullRequestActivityDate(
+    tableItem.gitPullRequest,
+    isActive
+  );
+  const activityName =
+    status === PullRequestStatus.Completed
+      ? "Completed"
+      : status === PullRequestStatus.Abandoned
+        ? "Abandoned"
+        : "Created";
+
   return (
     <TwoLineTableCell
       key={`col-when-${columnIndex}`}
@@ -331,8 +346,8 @@ export function DateColumn(
               iconProps: { iconName: "Calendar" },
               children: (
                 <Ago
-                  date={tableItem.gitPullRequest.creationDate!}
-                  tooltipProps={{ text: "Created on" }}
+                  date={activityDate}
+                  tooltipProps={{ text: `${activityName} on` }}
                 />
               ),
               disabled: false,
@@ -350,9 +365,11 @@ export function DateColumn(
               disabled={true}
             >
               <Duration
-                startDate={tableItem.gitPullRequest.creationDate!}
+                startDate={activityDate}
                 endDate={new Date(Date.now())}
-                tooltipProps={{ text: "Time elapsed since its creation" }}
+                tooltipProps={{
+                  text: `Time elapsed since it was ${activityName.toLowerCase()}`,
+                }}
               />
             </Button>
           </div>
