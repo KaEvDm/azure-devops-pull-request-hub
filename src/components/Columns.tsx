@@ -150,7 +150,7 @@ export function TitleColumn(
                 <div
                   className="flex-column title-column-subdetails"
                   style={{ marginLeft: "6px", marginTop: "5px" }}
-                />
+                ></div>
                 <div
                   className="flex-column title-column-subdetails"
                   style={{ marginLeft: "6px", marginTop: "5px" }}
@@ -291,7 +291,7 @@ export function DetailsColumn(
                   color={Data.draftColor}
                   className="icon-column-subdetails hideText"
                   iconProps={{ iconName: "Comment" }}
-                />
+                ></Pill>
               </Tooltip>
             </ConditionalChildren>
             <ConditionalChildren renderChildren={tableItem.hasCommitChanges()}>

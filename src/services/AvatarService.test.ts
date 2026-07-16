@@ -31,6 +31,13 @@ function createClient(): jest.Mocked<IGraphAvatarClient> {
 }
 
 describe("AvatarService", () => {
+  it("provides a neutral label for an inaccessible identity", () => {
+    expect(getIdentityDisplayName({})).toBe("Unknown user");
+    expect(getIdentityDisplayName({ isDeletedInOrigin: true })).toBe(
+      "Deleted user"
+    );
+  });
+
   it("loads current/owner and another organization user through Graph", async () => {
     const client = createClient();
     const service = new AvatarService(client);

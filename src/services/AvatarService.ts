@@ -26,6 +26,8 @@ export interface IGraphAvatarClient {
 }
 
 export class AvatarRestClient extends GraphRestClient {
+  // The generated getAvatar() materializes PNG bytes as a number[].
+  // Request raw bytes to avoid that payload overhead.
   public getAvatarBytes(subjectDescriptor: string): Promise<ArrayBuffer> {
     return this.beginRequest<ArrayBuffer>({
       apiVersion: "5.1-preview.1",
