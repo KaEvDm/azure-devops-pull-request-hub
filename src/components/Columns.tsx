@@ -27,6 +27,7 @@ import { IdentityAvatar } from "./IdentityAvatar";
 import { PullRequestStatus } from "azure-devops-extension-api/Git/Git";
 import { getPullRequestActivityDate } from "../models/PullRequestDate";
 import { formatLastCommitAge } from "../models/PullRequestLastCommit";
+import { formatLastCommentAge } from "../models/PullRequestLastComment";
 
 export function openNewWindowTab(targetUrl: string): void {
   window.open(targetUrl, UserPreferencesInstance.openPRNewWindow ? "_blank" : "_top");
@@ -426,6 +427,84 @@ export function LastCommitColumn(
         <span className="secondary-text">
           {tableItem.lastShortCommitId || ""}
         </span>
+      }
+    />
+  );
+}
+
+export function LastCommentColumn(
+  rowIndex: number,
+  columnIndex: number,
+  tableColumn: ITableColumn<PullRequestModel.PullRequestModel>,
+  tableItem: PullRequestModel.PullRequestModel
+): JSX.Element {
+  const details = tableItem.lastCommentDetails;
+  const commentDate = tableItem.getLastCommentDate();
+  const isLoading = tableItem.isLoadingLastComment();
+  const loadFailed = tableItem.hasLastCommentLoadFailed();
+  const age = commentDate ? formatLastCommentAge(commentDate) : "—";
+  const authorName =
+    details && details.author && details.author.displayName
+      ? details.author.displayName
+      : "";
+  const normalizedContent = details
+    ? details.content.replace(/\s+/g, " ").trim()
+    : "";
+  const preview =
+    normalizedContent.length > 120
+      ? `${normalizedContent.substr(0, 117)}...`
+      : normalizedContent;
+  const tooltip = commentDate
+    ? `Last comment${authorName ? ` by ${authorName}` : ""} at ${commentDate.toLocaleString()}${preview ? `\n${preview}` : ""}${loadFailed ? "\nRefresh failed; showing the last known value" : ""}`
+    : isLoading
+      ? "Loading the last user comment"
+      : loadFailed
+        ? "Last comment time is unavailable"
+        : "No user comments have been published";
+  const commentHref = tableItem.getLastCommentHref();
+  const authorLine = loadFailed
+    ? authorName
+      ? `${authorName} · stale`
+      : "Unavailable"
+    : authorName;
+
+  return (
+    <TwoLineTableCell
+      key={`col-last-comment-${columnIndex}`}
+      columnIndex={columnIndex}
+      tableColumn={tableColumn}
+      line1={
+        <Tooltip text={tooltip}>
+          <div className="flex-row flex-center">
+            <Icon iconName="Comment" className="icon-column-subdetails" />
+            {isLoading ? (
+              <Spinner size={SpinnerSize.small} />
+            ) : commentDate && commentHref ? (
+              <Link
+                className="bolt-link subtle"
+                href={commentHref}
+                target={
+                  UserPreferencesInstance.openPRNewWindow ? "_blank" : "_top"
+                }
+              >
+                {age}
+              </Link>
+            ) : (
+              <span className="secondary-text">{age}</span>
+            )}
+          </div>
+        </Tooltip>
+      }
+      line2={
+        authorLine ? (
+          <Tooltip text={authorLine}>
+            <span className="secondary-text text-ellipsis scroll-hidden">
+              {authorLine}
+            </span>
+          </Tooltip>
+        ) : (
+          <span />
+        )
       }
     />
   );

@@ -78,12 +78,14 @@ import {
   DetailsColumn,
   DateColumn,
   LastCommitColumn,
+  LastCommentColumn,
   ReviewersColumn,
 } from "../components/Columns";
 import { IListBoxItem } from "azure-devops-ui/ListBox";
 import { GitRepositoryModel } from '../models/PullRequestModel';
 import { TeamRef } from "./PulRequestsTabData";
 import { comparePullRequestsByLastCommit } from "../models/PullRequestLastCommit";
+import { comparePullRequestsByLastComment } from "../models/PullRequestLastComment";
 import {
   getLastSourceCommitKey,
   loadLastSourceCommits,
@@ -91,6 +93,7 @@ import {
 
 const WHEN_COLUMN_INDEX = 3;
 const LAST_COMMIT_COLUMN_INDEX = 4;
+const LAST_COMMENT_COLUMN_INDEX = 5;
 
 export interface IPullRequestTabProps {
   prType: PullRequestStatus;
@@ -110,6 +113,8 @@ export class PullRequestsTab extends React.Component<
   private silentRefresh: boolean = false;
   private lastLoadCompleted: number = 0;
   private autoRefreshTimer: number | undefined;
+  private relativeAgeTimer: number | undefined;
+  private lastCommentSortTimer: number | undefined;
   private previousPullRequests: PullRequestModel.PullRequestModel[] = [];
   private resultsCapped: boolean = false;
   private sortedColumnIndex: number = WHEN_COLUMN_INDEX;
@@ -183,12 +188,24 @@ export class PullRequestsTab extends React.Component<
       this.setupFilter();
       await this.initializePage();
       this.setupAutoRefresh();
+      this.setupRelativeAgeRefresh();
     });
   }
 
   componentWillUnmount() {
     this.unloadFilter();
     this.teardownAutoRefresh();
+
+    if (this.relativeAgeTimer !== undefined) {
+      window.clearInterval(this.relativeAgeTimer);
+      this.relativeAgeTimer = undefined;
+    }
+
+    if (this.lastCommentSortTimer !== undefined) {
+      window.clearTimeout(this.lastCommentSortTimer);
+      this.lastCommentSortTimer = undefined;
+    }
+
     window.removeEventListener(
       PREFERENCES_SAVED_EVENT,
       this.onPreferencesSaved
@@ -200,6 +217,19 @@ export class PullRequestsTab extends React.Component<
     // setting takes effect immediately, without a full page reload
     window.addEventListener(PREFERENCES_SAVED_EVENT, this.onPreferencesSaved);
     this.applyAutoRefresh();
+  }
+
+  private setupRelativeAgeRefresh() {
+    // Relative hour labels need a lightweight UI refresh even when network
+    // auto-refresh is disabled. This timer performs no Azure DevOps requests.
+    this.relativeAgeTimer = window.setInterval(() => {
+      if (
+        document.visibilityState === "visible" &&
+        this.state.pullRequests.length > 0
+      ) {
+        this.filterPullRequests();
+      }
+    }, 60 * 1000);
   }
 
   private onPreferencesSaved = () => {
@@ -678,7 +708,7 @@ export class PullRequestsTab extends React.Component<
         const loadedModels = PullRequestModel.PullRequestModel.getModels(
           loadedPullRequests,
           this.baseUrl,
-          (updatedPr) => {
+          (updatedPr, updateKind) => {
             let { tagList } = self.state;
             updatedPr.labels
               .filter((t) => !this.hasFilterValue(tagList, t.id))
@@ -689,11 +719,18 @@ export class PullRequestsTab extends React.Component<
                 return tagList;
               });
 
-            this.setState({
-              tagList,
-            });
+            const shouldResortComments =
+              updateKind === "comments" &&
+              self.sortedColumnIndex === LAST_COMMENT_COLUMN_INDEX &&
+              self.state.pullRequests.indexOf(updatedPr) >= 0;
 
-            this.filterPullRequests();
+            self.setState({ tagList }, () => {
+              self.filterPullRequests();
+
+              if (shouldResortComments) {
+                self.scheduleLastCommentSortRefresh();
+              }
+            });
           },
           this.silentRefresh ? this.previousPullRequests : undefined
         );
@@ -726,9 +763,10 @@ export class PullRequestsTab extends React.Component<
         }
 
         pullRequests =
-          this.sortedColumnIndex === LAST_COMMIT_COLUMN_INDEX
+          this.sortedColumnIndex === LAST_COMMIT_COLUMN_INDEX ||
+          this.sortedColumnIndex === LAST_COMMENT_COLUMN_INDEX
             ? this.sortPullRequestsByColumn(
-                LAST_COMMIT_COLUMN_INDEX,
+                this.sortedColumnIndex,
                 sortOrder,
                 pullRequests
               )
@@ -812,22 +850,57 @@ export class PullRequestsTab extends React.Component<
       [...pullRequests]
     );
 
-    if (columnIndex !== LAST_COMMIT_COLUMN_INDEX) {
+    const getActivityDate =
+      columnIndex === LAST_COMMIT_COLUMN_INDEX
+        ? (pullRequest: PullRequestModel.PullRequestModel) =>
+            pullRequest.getLastSourceCommitDate()
+        : columnIndex === LAST_COMMENT_COLUMN_INDEX
+          ? (pullRequest: PullRequestModel.PullRequestModel) =>
+              pullRequest.getLastCommentDate()
+          : undefined;
+
+    if (getActivityDate === undefined) {
       return sortedPullRequests;
     }
 
     // Keep unavailable/loading timestamps at the bottom in both directions.
     return sortedPullRequests
       .filter(
-        (pullRequest) =>
-          pullRequest.getLastSourceCommitDate() !== undefined
+        (pullRequest) => getActivityDate(pullRequest) !== undefined
       )
       .concat(
         sortedPullRequests.filter(
-          (pullRequest) =>
-            pullRequest.getLastSourceCommitDate() === undefined
+          (pullRequest) => getActivityDate(pullRequest) === undefined
         )
       );
+  }
+
+  /**
+   * Thread requests complete independently. Debouncing avoids a full table
+   * sort for every row while still applying a final order after the batch.
+   */
+  private scheduleLastCommentSortRefresh(): void {
+    if (this.lastCommentSortTimer !== undefined) {
+      window.clearTimeout(this.lastCommentSortTimer);
+    }
+
+    this.lastCommentSortTimer = window.setTimeout(() => {
+      this.lastCommentSortTimer = undefined;
+
+      if (this.sortedColumnIndex !== LAST_COMMENT_COLUMN_INDEX) {
+        return;
+      }
+
+      const sortedPullRequests = this.sortPullRequestsByColumn(
+        LAST_COMMENT_COLUMN_INDEX,
+        this.state.sortOrder,
+        this.state.pullRequests
+      );
+
+      this.setState({ pullRequests: sortedPullRequests }, () =>
+        this.filterPullRequests()
+      );
+    }, 100);
   }
 
   private async loadLists() {
@@ -1391,6 +1464,7 @@ export class PullRequestsTab extends React.Component<
     // Sort on When column
     Data.comparePullRequestAge,
     comparePullRequestsByLastCommit,
+    comparePullRequestsByLastComment,
     null, // Reviewers column
   ];
 
@@ -1409,14 +1483,14 @@ export class PullRequestsTab extends React.Component<
       name: "Pull Request",
       renderCell: TitleColumn,
       readonly: true,
-      width: -36,
+      width: -32,
     },
     {
       className: "pipelines-two-line-cell",
       id: "details",
       name: "Details",
       renderCell: DetailsColumn,
-      width: -20,
+      width: -18,
     },
     {
       id: "time",
@@ -1436,6 +1510,19 @@ export class PullRequestsTab extends React.Component<
       readonly: true,
       renderCell: LastCommitColumn,
       width: -10,
+      minWidth: 100,
+      sortProps: {
+        ariaLabelAscending: "Sorted newest to oldest",
+        ariaLabelDescending: "Sorted oldest to newest",
+      },
+    },
+    {
+      id: "last-comment",
+      name: "Last comment",
+      readonly: true,
+      renderCell: LastCommentColumn,
+      width: -10,
+      minWidth: 100,
       sortProps: {
         ariaLabelAscending: "Sorted newest to oldest",
         ariaLabelDescending: "Sorted oldest to newest",
@@ -1445,7 +1532,7 @@ export class PullRequestsTab extends React.Component<
       id: "reviewers",
       name: "Reviewers",
       renderCell: ReviewersColumn,
-      width: -20,
+      width: -16,
     },
   ];
 

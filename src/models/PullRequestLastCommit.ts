@@ -1,34 +1,25 @@
-const MILLISECONDS_PER_HOUR = 60 * 60 * 1000;
+import {
+  formatHoursAgo,
+  getElapsedHours,
+  getValidDateTimestamp,
+} from "./PullRequestAge";
 
 export interface ILastSourceCommitDateProvider {
   getLastSourceCommitDate(): Date | undefined;
-}
-
-function getValidTimestamp(date: Date | undefined): number | undefined {
-  if (date === undefined) {
-    return undefined;
-  }
-
-  const timestamp = date.getTime();
-  return Number.isNaN(timestamp) ? undefined : timestamp;
 }
 
 export function getElapsedCommitHours(
   commitDate: Date,
   now: Date = new Date()
 ): number {
-  return Math.max(
-    0,
-    Math.floor((now.getTime() - commitDate.getTime()) / MILLISECONDS_PER_HOUR)
-  );
+  return getElapsedHours(commitDate, now);
 }
 
 export function formatLastCommitAge(
   commitDate: Date,
   now: Date = new Date()
 ): string {
-  const hours = getElapsedCommitHours(commitDate, now);
-  return hours === 0 ? "<1h ago" : `${hours}h ago`;
+  return formatHoursAgo(commitDate, now);
 }
 
 /**
@@ -39,8 +30,8 @@ export function comparePullRequestsByLastCommit(
   a: ILastSourceCommitDateProvider,
   b: ILastSourceCommitDateProvider
 ): number {
-  const aTimestamp = getValidTimestamp(a.getLastSourceCommitDate());
-  const bTimestamp = getValidTimestamp(b.getLastSourceCommitDate());
+  const aTimestamp = getValidDateTimestamp(a.getLastSourceCommitDate());
+  const bTimestamp = getValidDateTimestamp(b.getLastSourceCommitDate());
 
   if (aTimestamp === undefined) {
     return bTimestamp === undefined ? 0 : 1;

@@ -2,7 +2,6 @@ import {
   GitPullRequest,
   IdentityRefWithVote,
   GitCommitRef,
-  CommentThreadStatus,
   PullRequestStatus,
 } from "azure-devops-extension-api/Git/Git";
 import * as DevOps from "azure-devops-extension-sdk";
@@ -22,12 +21,18 @@ import { USER_SETTINGS_STORE_KEY } from "../common";
 import { getEvaluationsPerPullRequest } from "../services/AzureGitServices";
 import { EvaluationPolicyType } from "./GitModels";
 import { GitRepository } from 'azure-devops-extension-api/Git/Git';
-import { compare } from "../lib/date";
 import { isPolicyApprovedForReadiness } from "./PolicyStatus";
+import {
+  getPullRequestCommentHref,
+  ILastPublishedPullRequestComment,
+  summarizePullRequestThreads,
+} from "./PullRequestLastComment";
 
 export interface GitRepositoryModel extends GitRepository {
   isDisabled: boolean | undefined;
 }
+
+export type PullRequestModelUpdateKind = "comments";
 
 export class PullRequestModel {
   private baseHostUrl: string = "";
@@ -49,6 +54,8 @@ export class PullRequestModel {
   public lastCommitDetails: GitCommitRef | undefined;
   // Actual source-head commit used by the Last commit age column.
   public lastSourceCommitDetails: GitCommitRef | undefined;
+  // Latest published regular user comment used by the Last comment column.
+  public lastCommentDetails: ILastPublishedPullRequestComment | undefined;
   public isAutoCompleteSet: boolean = false;
   public comment: PullRequestComment;
   public policies: PullRequestPolicy[] = [];
@@ -61,13 +68,18 @@ export class PullRequestModel {
   private loadingPolicies: boolean = false;
   private loadingLabels: boolean = false;
   private loadingLastSourceCommit: boolean = true;
+  private loadingComments: boolean = true;
+  private lastCommentLoadFailed: boolean = false;
   private requiredReviewers: IdentityRefWithVote[] = [];
 
   constructor(
     public gitPullRequest: GitPullRequest,
     public projectName: string,
     public baseUrl: string,
-    public callbackState: (pullRequestModel: PullRequestModel) => void,
+    public callbackState: (
+      pullRequestModel: PullRequestModel,
+      updateKind?: PullRequestModelUpdateKind
+    ) => void,
     private previousModel?: PullRequestModel
   ) {
     this.comment = new PullRequestComment();
@@ -150,6 +162,31 @@ export class PullRequestModel {
     return this.loadingLastSourceCommit;
   }
 
+  public getLastCommentDate(): Date | undefined {
+    return this.lastCommentDetails
+      ? this.lastCommentDetails.publishedDate
+      : undefined;
+  }
+
+  public getLastCommentHref(): string | undefined {
+    if (!this.pullRequestHref || !this.lastCommentDetails) {
+      return undefined;
+    }
+
+    return getPullRequestCommentHref(
+      this.pullRequestHref,
+      this.lastCommentDetails.threadId
+    );
+  }
+
+  public isLoadingLastComment(): boolean {
+    return this.loadingComments;
+  }
+
+  public hasLastCommentLoadFailed(): boolean {
+    return this.lastCommentLoadFailed;
+  }
+
   /**
    * Completes the tab-level batch load without triggering one table refresh
    * per row. PullRequestsTab refreshes the provider once after all models in
@@ -172,12 +209,12 @@ export class PullRequestModel {
     this.loadingLastSourceCommit = false;
   }
 
-  public triggerState() {
+  public triggerState(updateKind?: PullRequestModelUpdateKind) {
     this.pullRequestProgressStatus = this.getStatusIndicatorData(
       this.gitPullRequest.reviewers,
       this.isAllPoliciesOk
     );
-    this.callbackState(this);
+    this.callbackState(this, updateKind);
   }
 
   public isStillLoading() {
@@ -223,6 +260,13 @@ export class PullRequestModel {
       this.triggerState();
     });
 
+    // The thread response also supplies Last comment. Load it for every tab,
+    // including Abandoned, so the adjacent activity columns stay comparable.
+    this.getPullRequestThreadAsync().finally(() => {
+      this.loadingComments = false;
+      this.triggerState("comments");
+    });
+
     if (abandoned) {
       return;
     }
@@ -232,9 +276,6 @@ export class PullRequestModel {
     this.getPullRequestAdditionalDetailsAsync().finally(() =>
       this.triggerState()
     );
-
-    // Comment thread counts + "new comments" pill
-    this.getPullRequestThreadAsync().finally(() => this.triggerState());
 
     // Policy status drives the row's status icon
     this.getPullRequestPolicyAsync().finally(() => {
@@ -263,6 +304,9 @@ export class PullRequestModel {
     }
 
     this.comment = previous.comment;
+    this.lastCommentDetails = previous.lastCommentDetails;
+    this.loadingComments = previous.loadingComments;
+    this.lastCommentLoadFailed = previous.lastCommentLoadFailed;
     this.policies = previous.policies;
     this.isAllPoliciesOk = previous.isAllPoliciesOk;
     this.labels = previous.labels;
@@ -468,26 +512,17 @@ export class PullRequestModel {
         self.gitPullRequest.pullRequestId
       )
       .then((value) => {
-        if (value === undefined) {
-          return;
-        }
+        const summary = summarizePullRequestThreads(value);
 
-        const threads = value.filter((x) => x.status !== undefined && !x.isDeleted);
-        const terminatedThread = threads.filter(
-          (x) =>
-            x.status === CommentThreadStatus.Closed ||
-            x.status === CommentThreadStatus.WontFix ||
-            x.status === CommentThreadStatus.Fixed
-        );
-        const lastUpdatedDate = threads.map(x => x.lastUpdatedDate)
-          .reduce((x, y) => compare(x, y) > 0 ? x : y); // Get most recent
-
+        self.lastCommentLoadFailed = false;
         self.comment = new PullRequestComment();
-        self.comment.totalcomment = threads.length;
-        self.comment.terminatedComment = terminatedThread.length;
-        self.comment.lastUpdatedDate = lastUpdatedDate;
+        self.comment.totalcomment = summary.totalThreads;
+        self.comment.terminatedComment = summary.terminatedThreads;
+        self.comment.lastUpdatedDate = summary.lastThreadUpdatedDate;
+        self.lastCommentDetails = summary.lastComment;
       })
       .catch((error) => {
+        self.lastCommentLoadFailed = true;
         console.log(
           "There was an error calling the Pull Request threads (method: getPullRequestThreadAsync)."
         );
@@ -606,7 +641,10 @@ export class PullRequestModel {
   public static getModels(
     pullRequestList: GitPullRequest[] | undefined,
     baseUrl: string,
-    callbackState: (pullRequestModel: PullRequestModel) => void,
+    callbackState: (
+      pullRequestModel: PullRequestModel,
+      updateKind?: PullRequestModelUpdateKind
+    ) => void,
     existingModels?: PullRequestModel[]
   ): PullRequestModel[] {
     const modelList: PullRequestModel[] = [];
