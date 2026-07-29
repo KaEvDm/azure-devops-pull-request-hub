@@ -44,7 +44,11 @@ export class PullRequestModel {
   public lastShortCommitId?: string;
   public lastCommitUrl?: string;
   public pullRequestProgressStatus?: IStatusIndicatorData;
+  // Server-generated merge/update commit used by the existing "new changes"
+  // indicator because its date tracks when the PR was updated.
   public lastCommitDetails: GitCommitRef | undefined;
+  // Actual source-head commit used by the Last commit age column.
+  public lastSourceCommitDetails: GitCommitRef | undefined;
   public isAutoCompleteSet: boolean = false;
   public comment: PullRequestComment;
   public policies: PullRequestPolicy[] = [];
@@ -56,6 +60,7 @@ export class PullRequestModel {
   // labels. Everything else simply renders in once it arrives.
   private loadingPolicies: boolean = false;
   private loadingLabels: boolean = false;
+  private loadingLastSourceCommit: boolean = true;
   private requiredReviewers: IdentityRefWithVote[] = [];
 
   constructor(
@@ -127,7 +132,44 @@ export class PullRequestModel {
     return this.lastCommitDetails === undefined ||
       this.lastCommitDetails.committer === undefined
       ? this.gitPullRequest.creationDate
-      : this.lastCommitDetails!.committer.date!;
+      : this.lastCommitDetails.committer.date;
+  }
+
+  public getLastSourceCommitDate(): Date | undefined {
+    if (
+      this.lastSourceCommitDetails === undefined ||
+      this.lastSourceCommitDetails.committer === undefined
+    ) {
+      return undefined;
+    }
+
+    return this.lastSourceCommitDetails.committer.date;
+  }
+
+  public isLoadingLastSourceCommit(): boolean {
+    return this.loadingLastSourceCommit;
+  }
+
+  /**
+   * Completes the tab-level batch load without triggering one table refresh
+   * per row. PullRequestsTab refreshes the provider once after all models in
+   * the batch have been updated.
+   */
+  public completeLastSourceCommitLoad(commit?: GitCommitRef): void {
+    const expectedCommitId =
+      this.gitPullRequest.lastMergeSourceCommit &&
+      this.gitPullRequest.lastMergeSourceCommit.commitId;
+
+    if (
+      commit &&
+      commit.commitId &&
+      expectedCommitId &&
+      commit.commitId.toLowerCase() === expectedCommitId.toLowerCase()
+    ) {
+      this.lastSourceCommitDetails = commit;
+    }
+
+    this.loadingLastSourceCommit = false;
   }
 
   public triggerState() {
@@ -185,7 +227,8 @@ export class PullRequestModel {
       return;
     }
 
-    // Auto-complete flag + last commit (drives the "new commit(s)" pill)
+    // Auto-complete flag. Source commit metadata is loaded in repository
+    // batches by PullRequestsTab rather than with another request per PR.
     this.getPullRequestAdditionalDetailsAsync().finally(() =>
       this.triggerState()
     );
@@ -203,6 +246,22 @@ export class PullRequestModel {
   private seedFromPreviousModel(previous: PullRequestModel) {
     this.isAutoCompleteSet = previous.isAutoCompleteSet;
     this.lastCommitDetails = previous.lastCommitDetails;
+
+    const currentCommitId =
+      this.gitPullRequest.lastMergeSourceCommit &&
+      this.gitPullRequest.lastMergeSourceCommit.commitId;
+
+    if (
+      previous.lastSourceCommitDetails &&
+      previous.lastSourceCommitDetails.commitId &&
+      currentCommitId &&
+      previous.lastSourceCommitDetails.commitId.toLowerCase() ===
+        currentCommitId.toLowerCase()
+    ) {
+      this.lastSourceCommitDetails = previous.lastSourceCommitDetails;
+      this.loadingLastSourceCommit = false;
+    }
+
     this.comment = previous.comment;
     this.policies = previous.policies;
     this.isAllPoliciesOk = previous.isAllPoliciesOk;
@@ -230,6 +289,15 @@ export class PullRequestModel {
       this.gitPullRequest.repository.webUrl.length > 0
         ? this.gitPullRequest.repository.webUrl
         : `${this.baseHostUrl}/_git/${this.gitPullRequest.repository.name}`;
+    const sourceRepository =
+      this.gitPullRequest.forkSource &&
+      this.gitPullRequest.forkSource.repository
+        ? this.gitPullRequest.forkSource.repository
+        : this.gitPullRequest.repository;
+    const sourceRepositoryWebUrl =
+      sourceRepository.webUrl && sourceRepository.webUrl.length > 0
+        ? sourceRepository.webUrl
+        : repositoryWebUrl;
 
     this.repositoryHref = `${repositoryWebUrl}/`;
     this.pullRequestHref = `${repositoryWebUrl}/pullrequest/${this.gitPullRequest.pullRequestId}`;
@@ -247,11 +315,25 @@ export class PullRequestModel {
       this.gitPullRequest.reviewers,
       this.isAllPoliciesOk
     );
-    this.lastShortCommitId = this.gitPullRequest.lastMergeSourceCommit.commitId.substr(
-      0,
-      8
-    );
-    this.lastCommitUrl = `${repositoryWebUrl}/commit/${this.gitPullRequest.lastMergeSourceCommit.commitId}?refName=GB${this.gitPullRequest.sourceRefName}`;
+    const sourceCommit = this.gitPullRequest.lastMergeSourceCommit;
+
+    if (sourceCommit && sourceCommit.commitId) {
+      this.lastCommitId = sourceCommit.commitId;
+      this.lastShortCommitId = sourceCommit.commitId.substr(0, 8);
+      this.lastCommitUrl = `${sourceRepositoryWebUrl}/commit/${sourceCommit.commitId}?refName=GB${this.gitPullRequest.sourceRefName}`;
+
+      if (
+        this.lastSourceCommitDetails === undefined &&
+        sourceCommit.committer &&
+        sourceCommit.committer.date
+      ) {
+        this.lastSourceCommitDetails = sourceCommit;
+        this.loadingLastSourceCommit = false;
+      }
+    } else {
+      this.loadingLastSourceCommit = false;
+    }
+
     this.hasFailures = hasPullRequestFailure(this);
     this.loadLastVisit();
   }
@@ -364,11 +446,9 @@ export class PullRequestModel {
       .then((value) => {
         self.isAutoCompleteSet = value.autoCompleteSetBy !== undefined;
 
-        if (value.lastMergeCommit === undefined) {
-          return;
+        if (value.lastMergeCommit !== undefined) {
+          self.lastCommitDetails = value.lastMergeCommit;
         }
-
-        self.lastCommitDetails = value.lastMergeCommit;
       })
       .catch((error) => {
         console.log(

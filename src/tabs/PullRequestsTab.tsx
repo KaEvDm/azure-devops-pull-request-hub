@@ -26,6 +26,7 @@ import { IProjectPageService, getClient, IHostNavigationService } from "azure-de
 import { GitRestClient } from "azure-devops-extension-api/Git/GitClient";
 import { CoreRestClient } from "azure-devops-extension-api/Core/CoreClient";
 import {
+  GitCommitRef,
   GitPullRequest,
   GitPullRequestSearchCriteria,
   IdentityRefWithVote,
@@ -76,11 +77,20 @@ import {
   TitleColumn,
   DetailsColumn,
   DateColumn,
+  LastCommitColumn,
   ReviewersColumn,
 } from "../components/Columns";
 import { IListBoxItem } from "azure-devops-ui/ListBox";
 import { GitRepositoryModel } from '../models/PullRequestModel';
 import { TeamRef } from "./PulRequestsTabData";
+import { comparePullRequestsByLastCommit } from "../models/PullRequestLastCommit";
+import {
+  getLastSourceCommitKey,
+  loadLastSourceCommits,
+} from "../services/PullRequestCommitService";
+
+const WHEN_COLUMN_INDEX = 3;
+const LAST_COMMIT_COLUMN_INDEX = 4;
 
 export interface IPullRequestTabProps {
   prType: PullRequestStatus;
@@ -102,6 +112,7 @@ export class PullRequestsTab extends React.Component<
   private autoRefreshTimer: number | undefined;
   private previousPullRequests: PullRequestModel.PullRequestModel[] = [];
   private resultsCapped: boolean = false;
+  private sortedColumnIndex: number = WHEN_COLUMN_INDEX;
   private prRowSelecion = new ListSelection({
     selectOnFocus: true,
     multiSelect: false,
@@ -641,6 +652,7 @@ export class PullRequestsTab extends React.Component<
     let { pullRequests } = this.state;
 
     const newPullRequestList = Object.assign([], pullRequests);
+    let loadedModelsForCommitDetails: PullRequestModel.PullRequestModel[] = [];
 
     // clear the pull request list to be reloaded...
     newPullRequestList.splice(0, newPullRequestList.length);
@@ -663,30 +675,31 @@ export class PullRequestsTab extends React.Component<
       ).filter((pr) => enabledRepoIds.has(pr.repository.id));
 
       if (loadedPullRequests.length > 0) {
-        newPullRequestList.push(
-          ...PullRequestModel.PullRequestModel.getModels(
-            loadedPullRequests,
-            this.baseUrl,
-            (updatedPr) => {
-              let { tagList } = self.state;
-              updatedPr.labels
-                .filter((t) => !this.hasFilterValue(tagList, t.id))
-                .forEach((t) => {
-                  tagList.push(t);
-                  tagList = tagList.sort(Data.sortTagRepoTeamProject);
+        const loadedModels = PullRequestModel.PullRequestModel.getModels(
+          loadedPullRequests,
+          this.baseUrl,
+          (updatedPr) => {
+            let { tagList } = self.state;
+            updatedPr.labels
+              .filter((t) => !this.hasFilterValue(tagList, t.id))
+              .forEach((t) => {
+                tagList.push(t);
+                tagList = tagList.sort(Data.sortTagRepoTeamProject);
 
-                  return tagList;
-                });
-
-              this.setState({
-                tagList,
+                return tagList;
               });
 
-              this.filterPullRequests();
-            },
-            this.silentRefresh ? this.previousPullRequests : undefined
-          )
+            this.setState({
+              tagList,
+            });
+
+            this.filterPullRequests();
+          },
+          this.silentRefresh ? this.previousPullRequests : undefined
         );
+
+        newPullRequestList.push(...loadedModels);
+        loadedModelsForCommitDetails = loadedModels;
       }
     } catch (error) {
       this.handleError(error);
@@ -712,17 +725,109 @@ export class PullRequestsTab extends React.Component<
           }
         }
 
-        pullRequests = pullRequests.sort((a, b) =>
-          Data.sortPullRequests(a, b, sortOrder)
-        );
+        pullRequests =
+          this.sortedColumnIndex === LAST_COMMIT_COLUMN_INDEX
+            ? this.sortPullRequestsByColumn(
+                LAST_COMMIT_COLUMN_INDEX,
+                sortOrder,
+                pullRequests
+              )
+            : pullRequests.sort((a, b) =>
+                Data.sortPullRequests(a, b, sortOrder)
+              );
 
-        this.setState({
-          pullRequests,
+        this.setState({ pullRequests }, () => {
+          // The list response carries only shallow source-commit refs. Enrich
+          // all rows in repository batches instead of one request per PR.
+          this.loadLastCommitDetails(loadedModelsForCommitDetails);
         });
       }
 
       await this.loadLists();
     }
+  }
+
+  private async loadLastCommitDetails(
+    pullRequests: PullRequestModel.PullRequestModel[]
+  ): Promise<void> {
+    const modelsNeedingCommitDetails = pullRequests.filter((pullRequest) =>
+      pullRequest.isLoadingLastSourceCommit()
+    );
+    let commitsByKey = new Map<string, GitCommitRef>();
+
+    try {
+      commitsByKey = await loadLastSourceCommits(
+        this.gitClient,
+        modelsNeedingCommitDetails.map(
+          (pullRequest) => pullRequest.gitPullRequest
+        )
+      );
+    } catch (error) {
+      console.log("Unable to load last source commit details.");
+      console.log(error);
+    }
+
+    modelsNeedingCommitDetails.forEach((pullRequest) => {
+      const key = getLastSourceCommitKey(pullRequest.gitPullRequest);
+      pullRequest.completeLastSourceCommitLoad(
+        key ? commitsByKey.get(key) : undefined
+      );
+    });
+
+    // Ignore a late response from models replaced by a newer refresh.
+    const modelsStillVisible = pullRequests.some(
+      (pullRequest) => this.state.pullRequests.indexOf(pullRequest) >= 0
+    );
+
+    if (!modelsStillVisible) {
+      return;
+    }
+
+    if (this.sortedColumnIndex === LAST_COMMIT_COLUMN_INDEX) {
+      const sortedPullRequests = this.sortPullRequestsByColumn(
+        LAST_COMMIT_COLUMN_INDEX,
+        this.state.sortOrder,
+        this.state.pullRequests
+      );
+
+      this.setState({ pullRequests: sortedPullRequests }, () =>
+        this.filterPullRequests()
+      );
+    } else {
+      // One provider refresh is enough for every row in this repository batch.
+      this.filterPullRequests();
+    }
+  }
+
+  private sortPullRequestsByColumn(
+    columnIndex: number,
+    sortOrder: SortOrder,
+    pullRequests: PullRequestModel.PullRequestModel[]
+  ): PullRequestModel.PullRequestModel[] {
+    const sortedPullRequests = sortItems<PullRequestModel.PullRequestModel>(
+      columnIndex,
+      sortOrder,
+      this.sortFunctions,
+      this.columns,
+      [...pullRequests]
+    );
+
+    if (columnIndex !== LAST_COMMIT_COLUMN_INDEX) {
+      return sortedPullRequests;
+    }
+
+    // Keep unavailable/loading timestamps at the bottom in both directions.
+    return sortedPullRequests
+      .filter(
+        (pullRequest) =>
+          pullRequest.getLastSourceCommitDate() !== undefined
+      )
+      .concat(
+        sortedPullRequests.filter(
+          (pullRequest) =>
+            pullRequest.getLastSourceCommitDate() === undefined
+        )
+      );
   }
 
   private async loadLists() {
@@ -1132,13 +1237,13 @@ export class PullRequestsTab extends React.Component<
       // unfiltered cache used to reintroduce PRs the user had filtered out
       // (#251, #215). The setState callback ensures filterPullRequests() reads
       // the freshly sorted cache.
-      const sortedPullRequests = sortItems<PullRequestModel.PullRequestModel>(
+      const sortedPullRequests = this.sortPullRequestsByColumn(
         columnIndex,
         proposedSortOrder,
-        this.sortFunctions,
-        this.columns,
         this.state.pullRequests
       );
+
+      this.sortedColumnIndex = columnIndex;
 
       this.setState(
         { pullRequests: sortedPullRequests, sortOrder: proposedSortOrder },
@@ -1285,6 +1390,7 @@ export class PullRequestsTab extends React.Component<
     null, // Details column
     // Sort on When column
     Data.comparePullRequestAge,
+    comparePullRequestsByLastCommit,
     null, // Reviewers column
   ];
 
@@ -1303,7 +1409,7 @@ export class PullRequestsTab extends React.Component<
       name: "Pull Request",
       renderCell: TitleColumn,
       readonly: true,
-      width: -46,
+      width: -36,
     },
     {
       className: "pipelines-two-line-cell",
@@ -1322,6 +1428,17 @@ export class PullRequestsTab extends React.Component<
         ariaLabelAscending: "Sorted new to older",
         ariaLabelDescending: "Sorted older to new",
         sortOrder: this.getDefaultSortOrder(),
+      },
+    },
+    {
+      id: "last-commit",
+      name: "Last commit",
+      readonly: true,
+      renderCell: LastCommitColumn,
+      width: -10,
+      sortProps: {
+        ariaLabelAscending: "Sorted newest to oldest",
+        ariaLabelDescending: "Sorted oldest to newest",
       },
     },
     {

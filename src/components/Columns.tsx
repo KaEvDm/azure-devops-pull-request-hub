@@ -26,6 +26,7 @@ import { UserPreferencesInstance } from "../common";
 import { IdentityAvatar } from "./IdentityAvatar";
 import { PullRequestStatus } from "azure-devops-extension-api/Git/Git";
 import { getPullRequestActivityDate } from "../models/PullRequestDate";
+import { formatLastCommitAge } from "../models/PullRequestLastCommit";
 
 export function openNewWindowTab(targetUrl: string): void {
   window.open(targetUrl, UserPreferencesInstance.openPRNewWindow ? "_blank" : "_top");
@@ -374,6 +375,57 @@ export function DateColumn(
             </Button>
           </div>
         </div>
+      }
+    />
+  );
+}
+
+export function LastCommitColumn(
+  rowIndex: number,
+  columnIndex: number,
+  tableColumn: ITableColumn<PullRequestModel.PullRequestModel>,
+  tableItem: PullRequestModel.PullRequestModel
+): JSX.Element {
+  const commitDate = tableItem.getLastSourceCommitDate();
+  const isLoading = tableItem.isLoadingLastSourceCommit();
+  const age = commitDate ? formatLastCommitAge(commitDate) : "—";
+  const tooltip = commitDate
+    ? `Last source commit ${tableItem.lastShortCommitId || ""} at ${commitDate.toLocaleString()}`
+    : isLoading
+      ? "Loading the last source commit"
+      : "Last source commit time is unavailable";
+
+  return (
+    <TwoLineTableCell
+      key={`col-last-commit-${columnIndex}`}
+      columnIndex={columnIndex}
+      tableColumn={tableColumn}
+      line1={
+        <Tooltip text={tooltip}>
+          <div className="flex-row flex-center">
+            <Icon iconName="BranchCommit" className="icon-column-subdetails" />
+            {isLoading ? (
+              <Spinner size={SpinnerSize.small} />
+            ) : commitDate && tableItem.lastCommitUrl ? (
+              <Link
+                className="bolt-link subtle"
+                href={tableItem.lastCommitUrl}
+                target={
+                  UserPreferencesInstance.openPRNewWindow ? "_blank" : "_top"
+                }
+              >
+                {age}
+              </Link>
+            ) : (
+              <span className="secondary-text">{age}</span>
+            )}
+          </div>
+        </Tooltip>
+      }
+      line2={
+        <span className="secondary-text">
+          {tableItem.lastShortCommitId || ""}
+        </span>
       }
     />
   );
